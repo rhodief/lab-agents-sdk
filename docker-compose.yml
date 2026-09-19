@@ -1,0 +1,54 @@
+# docker-compose.yml
+services:
+  rh-agents:
+    build:
+      context: ./rh-agents
+      dockerfile: Dockerfile
+    image: rh-agents:local
+    init: true
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./rh-agents:/app
+  phoenix:
+    image: arizephoenix/phoenix:latest # Must be greater than 4.0 version to work
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+    ports:
+      - 6006:6006  # PHOENIX_PORT
+      - 4317:4317  # PHOENIX_GRPC_PORT
+      - 9090:9090  # [Optional] PROMETHEUS PORT IF ENABLED
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=postgresql://postgres:postgres@postgres_db:5432/phoenix
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:latest
+    ports:
+      - "4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: sk-litellm-key
+      LITELLM_SALT_KEY: sk-LITELLM-KEY
+      DATABASE_URL: postgresql://litellm:litellm@postgres_db:5432/litellm
+      STORE_MODEL_IN_DB: "True"
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+
+  postgres_db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - shared_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+volumes:
+  shared_postgres_data:
+    

@@ -1,0 +1,4 @@
+CREATE DATABASE phoenix;
+
+CREATE USER litellm WITH PASSWORD 'litellm';
+CREATE DATABASE litellm OWNER litellm;

@@ -1,0 +1,5 @@
+openai-agents
+pydantic
+python-dotenv
+arize-phoenix
+openinference-instrumentation-openai-agents
