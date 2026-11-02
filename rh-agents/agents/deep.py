@@ -6,6 +6,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessageChunk, ToolMessage
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_config
 from tavily import TavilyClient
 from tavily.errors import BadRequestError, TimeoutError as TavilyTimeoutError
 from deepagents import create_deep_agent
@@ -14,6 +15,8 @@ load_dotenv(override=True)
 
 # Gemini served through the LiteLLM proxy (same setup as index.py)
 MODEL = "gemini-3.8-flash"
+APPLICATION = "research-agent"
+ENVIRONMENT = "development"
 PINK = "\033[95m"
 CYAN = "\033[96m"
 YELLOW = "\033[93m"
@@ -23,7 +26,31 @@ RESET = "\033[0m"
 
 
 class ChatLiteLLM(ChatOpenAI):
-    """ChatOpenAI that keeps the proxy's non-standard `reasoning_content` deltas."""
+    """ChatOpenAI that keeps the proxy's non-standard `reasoning_content` deltas and tags each call for LiteLLM."""
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        try:
+            config = get_config()  # the running graph's config: thread_id plus the run's metadata
+        except RuntimeError:
+            return payload  # called outside an agent run
+        metadata = config.get("metadata", {})
+        session_id = config.get("configurable", {}).get("thread_id")
+        if user_id := metadata.get("user_id"):
+            payload["user"] = user_id
+        # Same enrichment as index.py: LiteLLM uses it for spend tracking, logs and per-session correlation
+        payload["extra_body"] = {
+            **payload.get("extra_body", {}),
+            "metadata": {
+                "session_id": session_id,
+                "tenant_id": metadata.get("tenant_id"),
+                "team_id": metadata.get("team_id"),
+                "application": APPLICATION,
+                "langgraph_node": metadata.get("langgraph_node"),
+            },
+            "tags": [APPLICATION, ENVIRONMENT, *(f"{k}:{metadata[k]}" for k in ("tenant_id", "team_id") if metadata.get(k))],
+        }
+        return payload
 
     def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info):
         generation_chunk = super()._convert_chunk_to_generation_chunk(
@@ -84,22 +111,16 @@ agent = create_deep_agent(
 )
 
 
-def stream(input, config=None, agent=agent, context=None):
-    """Stream one run. `input` is a query string, an input dict, or a `Command(resume=...)`."""
+def iter_events(input, config=None, agent=agent, context=None):
+    """Run the agent and yield plain event dicts: thinking/text deltas, tool calls, tool results, then stats.
+
+    `input` is a query string, an input dict, or a `Command(resume=...)`. Consumers (terminal, SSE) only render.
+    """
     if isinstance(input, str):
         input = {"messages": [{"role": "user", "content": input}]}
     stats = Counter()
     tool_calls = Counter()
-    section = None  # "thinking" | "text" | "tool" — reprint a header when it changes
     started = time.perf_counter()
-
-    def enter(name, color, label):
-        nonlocal section
-        if section != name:
-            print(f"{RESET}\n\n{BOLD}{color}[{label}]{RESET}{color}", end="\n", flush=True)
-            section = name
-        else:
-            print(color, end="")
 
     # subgraphs=True also streams the subagents spawned through the `task` tool
     for namespace, (msg, _metadata) in agent.stream(
@@ -109,23 +130,19 @@ def stream(input, config=None, agent=agent, context=None):
         stream_mode="messages",
         subgraphs=True,
     ):
-        where = f" · {namespace[-1].split(':')[0]}" if namespace else ""
+        where = namespace[-1].split(":")[0] if namespace else None
 
         if isinstance(msg, AIMessageChunk):
             if reasoning := msg.additional_kwargs.get("reasoning_content"):
-                enter(f"thinking{where}", PINK, f"thinking{where}")
-                print(reasoning, end="", flush=True)
+                yield {"type": "thinking", "agent": where, "text": reasoning}
             if msg.text:
-                enter(f"text{where}", RESET, f"text{where}")
-                print(msg.text, end="", flush=True)
+                yield {"type": "text", "agent": where, "text": msg.text}
             for tc in msg.tool_call_chunks:
                 if tc.get("name"):
                     tool_calls[tc["name"]] += 1
-                    section = None
-                    enter(f"tool{where}", YELLOW, f"tool call{where}")
-                    print(f"{tc['name']}(", end="")
+                    yield {"type": "tool_call", "agent": where, "index": tc.get("index"), "id": tc.get("id"), "name": tc["name"]}
                 if tc.get("args"):
-                    print(f"{YELLOW}{tc['args']}", end="", flush=True)
+                    yield {"type": "tool_args", "agent": where, "index": tc.get("index"), "args": tc["args"]}
             if msg.usage_metadata:
                 usage = msg.usage_metadata
                 stats["llm_calls"] += 1
@@ -133,18 +150,58 @@ def stream(input, config=None, agent=agent, context=None):
                 stats["output_tokens"] += usage.get("output_tokens", 0)
                 stats["reasoning_tokens"] += (usage.get("output_token_details") or {}).get("reasoning", 0)
         elif isinstance(msg, ToolMessage):
-            enter(f"result{where}", CYAN, f"tool result · {msg.name}{where}")
-            content = str(msg.content).replace("\n", " ")
-            print(f"{DIM}{content[:300]}{'…' if len(content) > 300 else ''}", end="", flush=True)
+            yield {"type": "tool_result", "agent": where, "tool_call_id": msg.tool_call_id, "name": msg.name,
+                   "content": str(msg.content)[:4000]}
 
-    elapsed = time.perf_counter() - started
-    print(f"{RESET}\n\n{BOLD}[stats]{RESET}")
-    print(f"  time        {elapsed:.1f}s")
-    print(f"  llm calls   {stats['llm_calls']}")
-    print(f"  tokens      {stats['input_tokens']} in / {stats['output_tokens']} out"
-          f" ({stats['reasoning_tokens']} reasoning)")
-    print(f"  tool calls  {sum(tool_calls.values())}"
-          + (" — " + ", ".join(f"{n}×{c}" for n, c in tool_calls.most_common()) if tool_calls else ""))
+    yield {"type": "stats", "seconds": round(time.perf_counter() - started, 1), **stats,
+           "tool_calls": dict(tool_calls.most_common())}
+
+
+def print_events(events):
+    """Terminal renderer for `iter_events`: one colored section per kind of output."""
+    section = None  # reprint a header when the kind of output changes
+
+    def enter(name, color, label):
+        nonlocal section
+        if section != name:
+            print(f"{RESET}\n\n{BOLD}{color}[{label}]{RESET}{color}", end="\n", flush=True)
+            section = name
+        else:
+            print(color, end="")
+
+    for event in events:
+        where = f" · {event['agent']}" if event.get("agent") else ""
+        kind = event["type"]
+        if kind == "thinking":
+            enter(f"thinking{where}", PINK, f"thinking{where}")
+            print(event["text"], end="", flush=True)
+        elif kind == "text":
+            enter(f"text{where}", RESET, f"text{where}")
+            print(event["text"], end="", flush=True)
+        elif kind == "tool_call":
+            section = None
+            enter(f"tool{where}", YELLOW, f"tool call{where}")
+            print(f"{event['name']}(", end="")
+        elif kind == "tool_args":
+            print(f"{YELLOW}{event['args']}", end="", flush=True)
+        elif kind == "tool_result":
+            enter(f"result{where}", CYAN, f"tool result · {event['name']}{where}")
+            content = event["content"].replace("\n", " ")
+            print(f"{DIM}{content[:300]}{'…' if len(content) > 300 else ''}", end="", flush=True)
+        elif kind == "stats":
+            tool_calls = event["tool_calls"]
+            print(f"{RESET}\n\n{BOLD}[stats]{RESET}")
+            print(f"  time        {event['seconds']:.1f}s")
+            print(f"  llm calls   {event.get('llm_calls', 0)}")
+            print(f"  tokens      {event.get('input_tokens', 0)} in / {event.get('output_tokens', 0)} out"
+                  f" ({event.get('reasoning_tokens', 0)} reasoning)")
+            print(f"  tool calls  {sum(tool_calls.values())}"
+                  + (" — " + ", ".join(f"{n}×{c}" for n, c in tool_calls.items()) if tool_calls else ""))
+
+
+def stream(input, config=None, agent=agent, context=None):
+    """Stream one run to the terminal."""
+    print_events(iter_events(input, config, agent=agent, context=context))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Agent · Teams</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #ffffff; --border: #e3e3e8; --text: #1d1d22; --muted: #6b6b76;
+    --accent: #2563eb; --accent-text: #ffffff; --user: #e8effd;
+    --thinking: #a21caf; --thinking-bg: #fbf0fc; --tool: #b45309; --tool-bg: #fff8eb;
+    --result: #0e7490; --error: #b91c1c; --error-bg: #fdecec; --ok: #15803d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141417; --panel: #1c1c21; --border: #2e2e36; --text: #e8e8ee; --muted: #9a9aa6;
+      --accent: #6b9bff; --accent-text: #0b0b0e; --user: #22304d;
+      --thinking: #e879f9; --thinking-bg: #2a1a2e; --tool: #fbbf24; --tool-bg: #2b2414;
+      --result: #67e8f9; --error: #fca5a5; --error-bg: #3a1c1c; --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 6px 12px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .5; cursor: default; }
+  input, select, textarea { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; font: 12.5px/1.45 ui-monospace, monospace; }
+
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; }
+  header label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  header input { width: 120px; }
+  header .spacer { flex: 1; }
+
+  .layout { display: grid; grid-template-columns: 270px 1fr; min-height: 0; }
+  aside.sessions { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside.sessions .top { padding: 12px; display: flex; gap: 8px; align-items: center; }
+  aside.sessions .context { padding: 0 12px 8px; color: var(--muted); font-size: 12px; }
+  aside.sessions ul { list-style: none; margin: 0; padding: 0 8px 12px; overflow: auto; }
+  aside.sessions li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  aside.sessions li:hover { background: var(--bg); }
+  aside.sessions li.active { background: var(--user); }
+  aside.sessions li .title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  aside.sessions li .meta { font-size: 12px; color: var(--muted); }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); }
+  .badge.waiting { color: var(--tool); border-color: var(--tool); }
+  .people { font-size: 12px; color: var(--muted); }
+  aside.sessions li .people { display: block; }
+  .session-info { font-size: 12px; color: var(--muted); padding: 8px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+
+  main { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+  #chat { overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .empty { color: var(--muted); margin: auto; text-align: center; }
+  .msg { max-width: 860px; width: 100%; margin: 0 auto; }
+  .user { background: var(--user); padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; }
+  .author { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 4px 4px; }
+  .msg.mine { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg.mine .user { max-width: 85%; }
+  .msg.theirs .user { background: var(--panel); border: 1px solid var(--border); max-width: 85%; }
+  .assistant { padding: 2px 2px; }
+  .assistant > :first-child { margin-top: 0; } .assistant > :last-child { margin-bottom: 0; }
+  .assistant table { border-collapse: collapse; } .assistant td, .assistant th { border: 1px solid var(--border); padding: 4px 8px; }
+  .agent-tag { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  details.thinking { border-left: 3px solid var(--thinking); background: var(--thinking-bg); border-radius: 6px; padding: 6px 10px; }
+  details.thinking summary { color: var(--thinking); cursor: pointer; font-weight: 600; }
+  details.thinking pre { color: var(--thinking); margin-top: 6px; max-height: 320px; overflow: auto; font-family: inherit; font-size: 13px; }
+  details.tool { border: 1px solid var(--border); border-left: 3px solid var(--tool); background: var(--tool-bg); border-radius: 6px; padding: 6px 10px; }
+  details.tool summary { cursor: pointer; color: var(--tool); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  details.tool summary .preview { color: var(--muted); font-weight: 400; margin-left: 6px; font-family: ui-monospace, monospace; font-size: 12px; }
+  details.tool .label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 8px; }
+  details.tool .result { color: var(--result); max-height: 260px; overflow: auto; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--tool); margin-right: 6px; animation: pulse 1s infinite; }
+  .done .status-dot { background: var(--ok); animation: none; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .stats { color: var(--muted); font-size: 12px; border-top: 1px dashed var(--border); padding-top: 6px; }
+  .error { color: var(--error); background: var(--error-bg); padding: 8px 12px; border-radius: 8px; }
+  .pending { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 12px; }
+  .pending h3 { margin: 0; font-size: 13px; color: var(--accent); }
+  .pending textarea { width: 100%; min-height: 60px; }
+  .approval { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .approval .path { font-family: ui-monospace, monospace; font-weight: 600; }
+  .approval pre { background: var(--bg); padding: 6px 8px; border-radius: 6px; margin: 6px 0; max-height: 200px; overflow: auto; }
+  .approval .choice { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .approval .choice input[type=text] { flex: 1; min-width: 160px; }
+
+  form.composer { display: flex; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--panel); }
+  form.composer textarea { flex: 1; resize: none; height: 46px; max-width: 860px; margin-left: auto; }
+  form.composer button { margin-right: auto; }
+
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100%); background: var(--panel); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.15); display: none; flex-direction: column; z-index: 10; }
+  #drawer.open { display: flex; }
+  #drawer .head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  #drawer .head h2 { font-size: 15px; margin: 0; flex: 1; }
+  #drawer .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
+  #drawer .tabs button { border-radius: 8px 8px 0 0; border-bottom: none; }
+  #drawer .tabs button.active { background: var(--user); }
+  #drawer .body { overflow: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); flex: 1; }
+  .memfile { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .memfile .path { font-family: ui-monospace, monospace; font-weight: 600; }
+  .memfile .when { font-size: 12px; color: var(--muted); }
+  .memfile pre { margin-top: 6px; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 800px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: 180px 1fr; }
+    aside.sessions { border-right: none; border-bottom: 1px solid var(--border); }
+    #chat, form.composer { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Research Agent <span class="people">· team sessions</span></h1>
+  <label>Sector <input id="tenant" placeholder="acme"></label>
+  <label>User <input id="user" placeholder="alice"></label>
+  <button id="apply">Enter</button>
+  <label>Team <select id="team"></select></label>
+  <span class="spacer"></span>
+  <button id="memoriesBtn">Memories</button>
+</header>
+
+<div class="layout">
+  <aside class="sessions">
+    <div class="top"><button class="primary" id="newSession">+ New session</button></div>
+    <div class="context" id="contextLabel"></div>
+    <ul id="sessions"></ul>
+  </aside>
+  <main>
+    <div id="chat"><div class="empty">Choose a sector and user, then start a session.</div></div>
+    <form class="composer" id="composer">
+      <textarea id="prompt" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea>
+      <button class="primary" id="send">Send</button>
+    </form>
+  </main>
+</div>
+
+<div id="drawer">
+  <div class="head"><h2>Memories</h2><button id="refreshMem">Refresh</button><button id="closeMem">Close</button></div>
+  <div class="tabs" id="memTabs"></div>
+  <div class="body" id="memBody"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { tenant: "", user: "", team: null, teams: [], threadId: null, busy: false, memTab: "sector", memories: null };
+
+// ---------- helpers ----------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const md = (text) => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(text)) : `<p>${esc(text).replace(/\n/g, "<br>")}</p>`;
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+const scopeParams = () => { const p = { tenant: state.tenant, user: state.user }; if (state.team) p.team = state.team; return p; };
+const when = (iso) => new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+const pretty = (v) => { if (typeof v !== "string") return JSON.stringify(v, null, 2); try { return JSON.stringify(JSON.parse(v), null, 2); } catch { return v; } };
+
+async function api(path, { params, body } = {}) {
+  const url = path + (params ? "?" + new URLSearchParams(params) : "");
+  const res = await fetch(url, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res;
+}
+const getJSON = async (path, params) => (await api(path, { params })).json();
+
+function save() { try { localStorage.setItem("scope", JSON.stringify({ tenant: state.tenant, user: state.user, team: state.team })); } catch {} }
+function restore() { try { return JSON.parse(localStorage.getItem("scope") || "{}"); } catch { return {}; } }
+
+// ---------- scope: sector / user / team ----------
+async function enterScope() {
+  state.tenant = $("tenant").value.trim();
+  state.user = $("user").value.trim();
+  if (!state.tenant || !state.user) return showError("Fill in sector and user.");
+  try {
+    state.teams = (await getJSON("/api/teams", { tenant: state.tenant, user: state.user })).teams;
+  } catch (e) { return showError(e.message); }
+  if (state.team && !state.teams.includes(state.team)) state.team = null;
+  if (!state.team && state.teams.length) state.team = state.teams[0];
+  renderTeams(); save(); newSession(); await loadSessions(); if ($("drawer").classList.contains("open")) loadMemories();
+}
+
+function renderTeams() {
+  const sel = $("team");
+  sel.innerHTML = "";
+  sel.append(new Option("— no team —", ""));
+  state.teams.forEach((t) => sel.append(new Option(t, t)));
+  sel.append(new Option("+ join team…", "__join__"));
+  sel.value = state.team || "";
+}
+
+async function changeTeam() {
+  let value = $("team").value;
+  if (value === "__join__") {
+    const name = prompt("Team name to join:");
+    if (!name) return renderTeams();
+    try { state.teams = (await (await api("/api/teams", { body: { tenant: state.tenant, user: state.user, team: name.trim() } })).json()).teams; }
+    catch (e) { renderTeams(); return showError(e.message); }
+    value = name.trim();
+  }
+  state.team = value || null;
+  renderTeams(); save(); newSession(); await loadSessions(); if ($("drawer").classList.contains("open")) loadMemories();
+}
+
+// ---------- sessions ----------
+const who = (u) => (u && u === state.user ? "you" : esc(u || "?"));
+function people(s) {
+  if (!s.created_by) return "";
+  const last = s.last_user && s.last_user !== s.created_by ? ` · last by ${who(s.last_user)}` : "";
+  return `started by ${who(s.created_by)}${last}`;
+}
+async function loadSessions() {
+  $("contextLabel").textContent = !state.tenant ? "" : state.team
+    ? `${state.tenant} / ${state.team} / ${state.user} · sessions shared with team ${state.team}`
+    : `${state.tenant} / no team / ${state.user} · private sessions`;
+  const list = $("sessions");
+  if (!state.tenant || !state.user) { list.innerHTML = ""; return []; }
+  const { sessions } = await getJSON("/api/sessions", scopeParams());
+  list.innerHTML = sessions.length ? "" : `<li class="hint">No sessions in this context yet.</li>`;
+  for (const s of sessions) {
+    const li = el("li", s.id === state.threadId ? "active" : "",
+      `<span class="title">${esc(s.title)}</span><span class="meta"><span class="badge ${s.status === "waiting for you" ? "waiting" : ""}">${esc(s.status)}</span> ${when(s.updated_at)}</span>` +
+      `<span class="people">${people(s)}</span>`);
+    li.onclick = () => openSession(s.id);
+    list.append(li);
+  }
+  return sessions;
+}
+
+// remember the version of the open session we're showing, so polling can tell when a teammate changed it
+function markSeen(sessions) { state.seenAt = sessions.find((s) => s.id === state.threadId)?.updated_at ?? null; }
+
+function newSession() {
+  state.threadId = null;
+  $("chat").innerHTML = `<div class="empty">New session in <b>${esc(state.tenant || "?")} / ${esc(state.team || "no team")}</b>. Ask something below.<br>` +
+    (state.team ? `Everyone in team <b>${esc(state.team)}</b> will be able to see and continue it.` : "It will be private to you.") + `</div>`;
+  document.querySelectorAll("#sessions li").forEach((li) => li.classList.remove("active"));
+  $("prompt").focus();
+}
+
+async function openSession(id) {
+  if (state.busy) return;
+  state.threadId = id;
+  markSeen(await loadSessions());
+  let data;
+  try { data = await getJSON(`/api/sessions/${id}`, scopeParams()); } catch (e) { return showError(e.message); }
+  const chat = $("chat"); chat.innerHTML = "";
+  if (state.team && data.created_by) chat.append(el("div", "session-info",
+    `Shared with team <b>${esc(state.team)}</b> · ${people(data)}. Anyone in the team can continue it or answer the agent's questions.`));
+  const turn = new TurnView(chat);
+  for (const m of data.messages) {
+    if (m.role === "user") { turn.flush(); chat.append(userMsg(m.text, m.author)); }
+    else if (m.role === "assistant") turn.text(null, m.text);
+    else if (m.role === "thinking") turn.thinking(null, m.text);
+    else if (m.role === "tool") turn.history(m);
+  }
+  turn.finish();
+  if (data.pending.length) renderPending(data.pending);
+  scrollDown();
+}
+
+// ---------- streaming turn rendering ----------
+const msg = (child) => { const wrap = el("div", "msg"); wrap.append(child); return wrap; };
+function userMsg(text, author) {  // a user message with its author: "you", or a teammate's name
+  const mine = !author || author === state.user;
+  const wrap = el("div", `msg ${mine ? "mine" : "theirs"}`);
+  wrap.append(el("div", "author", mine ? "you" : esc(author)), el("div", "user", esc(text)));
+  return wrap;
+}
+const scrollDown = () => { const c = $("chat"); c.scrollTop = c.scrollHeight; };
+
+class TurnView {
+  constructor(root) { this.root = root; this.cur = null; this.cards = {}; this.byId = {}; }
+  flush() { this.cur = null; }
+  block(kind, agent, build) {
+    if (!this.cur || this.cur.kind !== kind || this.cur.agent !== agent) {
+      this.cur = { kind, agent, raw: "", ...build() };
+      this.root.append(msg(this.cur.el));
+    }
+    return this.cur;
+  }
+  tag(agent) { return agent ? `<span class="agent-tag">· ${esc(agent)}</span>` : ""; }
+  thinking(agent, text) {
+    const b = this.block("thinking", agent, () => {
+      const d = el("details", "thinking"); d.open = true;
+      d.innerHTML = `<summary>Thinking${this.tag(agent)}</summary><pre></pre>`;
+      return { el: d, out: d.querySelector("pre") };
+    });
+    b.raw += text; b.out.textContent = b.raw;
+  }
+  text(agent, text) {
+    const b = this.block("text", agent, () => { const d = el("div", "assistant"); return { el: d, out: d }; });
+    b.raw += text; b.out.innerHTML = md(b.raw) + (agent ? this.tag(agent) : "");
+  }
+  toolCard(name, agent) {
+    const d = el("details", "tool");
+    d.innerHTML = `<summary><span class="status-dot"></span>${esc(name)}${this.tag(agent)}<span class="preview"></span></summary>
+      <div class="label">arguments</div><pre class="args"></pre><div class="label">result</div><pre class="result">…</pre>`;
+    this.root.append(msg(d)); this.cur = { kind: "tool", agent };
+    return { el: d, args: "", argsEl: d.querySelector(".args"), resultEl: d.querySelector(".result"), preview: d.querySelector(".preview") };
+  }
+  toolCall(e) {
+    const card = this.toolCard(e.name, e.agent);
+    this.cards[`${e.agent}|${e.index}`] = card;
+    if (e.id) this.byId[e.id] = card;
+  }
+  toolArgs(e) {
+    const card = this.cards[`${e.agent}|${e.index}`]; if (!card) return;
+    card.args += e.args; card.argsEl.textContent = card.args; card.preview.textContent = card.args.slice(0, 120);
+  }
+  toolResult(e) {
+    const card = this.byId[e.tool_call_id] || this.toolCard(e.name, e.agent);
+    card.argsEl.textContent = pretty(card.args);
+    card.resultEl.textContent = pretty(e.content);
+    card.el.classList.add("done");
+    this.cur = null;
+  }
+  history(m) {  // a tool call loaded from the checkpoint
+    const card = this.toolCard(m.name, null);
+    card.el.classList.add("done");
+    if (m.args !== undefined) {
+      card.args = JSON.stringify(m.args); card.argsEl.textContent = pretty(m.args);
+      card.preview.textContent = card.args.slice(0, 120); card.resultEl.textContent = pretty(m.result ?? "");
+    } else {
+      card.el.querySelectorAll(".label, pre").forEach((n) => n.remove());
+      card.el.querySelector("summary").title = "details are only kept for the last turn";
+    }
+    this.cur = null;
+  }
+  stats(e) {
+    const tools = Object.entries(e.tool_calls || {}).map(([n, c]) => `${n}×${c}`).join(", ");
+    this.root.append(msg(el("div", "stats",
+      `${e.seconds}s · ${e.llm_calls || 0} model calls · ${e.input_tokens || 0} in / ${e.output_tokens || 0} out (${e.reasoning_tokens || 0} reasoning) · ${Object.values(e.tool_calls || {}).reduce((a, b) => a + b, 0)} tool calls${tools ? " — " + esc(tools) : ""}`)));
+    this.cur = null;
+  }
+  finish() { this.root.querySelectorAll("details.thinking").forEach((d) => (d.open = false)); this.cur = null; }
+}
+
+function showError(message) {
+  $("chat").querySelector(".empty")?.remove();
+  $("chat").append(msg(el("div", "error", esc(message)))); scrollDown();
+}
+
+async function runTurn(body) {
+  state.busy = true; setBusy(true);
+  $("chat").querySelector(".empty")?.remove();
+  document.querySelectorAll(".pending").forEach((p) => p.closest(".msg").remove());
+  const turn = new TurnView($("chat"));
+  let pending = [];
+  try {
+    const res = await api("/api/turn", { body: { ...scopeParams(), thread_id: state.threadId, ...body } });
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+        if (!line.startsWith("data: ")) continue;
+        const e = JSON.parse(line.slice(6));
+        const atBottom = $("chat").scrollHeight - $("chat").scrollTop - $("chat").clientHeight < 80;
+        if (e.type === "session") { if (!state.threadId) { state.threadId = e.id; loadSessions(); } }
+        else if (e.type === "thinking") turn.thinking(e.agent, e.text);
+        else if (e.type === "text") turn.text(e.agent, e.text);
+        else if (e.type === "tool_call") turn.toolCall(e);
+        else if (e.type === "tool_args") turn.toolArgs(e);
+        else if (e.type === "tool_result") turn.toolResult(e);
+        else if (e.type === "stats") turn.stats(e);
+        else if (e.type === "pending") pending = e.items;
+        else if (e.type === "error") showError(e.message);
+        if (atBottom) scrollDown();
+      }
+    }
+  } catch (e) { showError(/already has a turn running/.test(e.message) && state.team
+      ? "Someone in the team is already running a turn in this session. Wait for it to finish, then reopen the session." : e.message); }
+  turn.finish();
+  if (pending.length) renderPending(pending);
+  state.busy = false; setBusy(false); scrollDown();
+  loadSessions().then(markSeen);
+  if ($("drawer").classList.contains("open")) loadMemories();
+}
+
+function setBusy(busy) { $("send").disabled = busy; $("prompt").disabled = busy; $("newSession").disabled = busy; }
+
+// ---------- interrupts: ask_user questions and write approvals ----------
+function renderPending(items) {
+  const box = el("div", "pending");
+  items.forEach((item, i) => {
+    if (item.kind === "question") {
+      box.append(el("h3", "", "The agent asks"));
+      const q = el("div", "", md(item.question)); box.append(q);
+      const ta = el("textarea"); ta.dataset.id = item.id; ta.placeholder = "Your answer"; box.append(ta);
+    } else {
+      box.append(el("h3", "", "Approve writes to shared memory"));
+      item.actions.forEach((a, j) => {
+        const name = `ap-${i}-${j}`;
+        const card = el("div", "approval",
+          `<div class="path">${esc(a.name)} › ${esc(a.file_path)}</div><pre>${esc(a.content)}</pre>
+           <div class="choice"><label><input type="radio" name="${name}" value="approve" checked> approve</label>
+           <label><input type="radio" name="${name}" value="reject"> reject</label>
+           <input type="text" placeholder="reason (optional, sent to the agent)"></div>`);
+        card.dataset.id = item.id; box.append(card);
+      });
+    }
+  });
+  const send = el("button", "primary", "Send"); send.type = "button";
+  send.onclick = () => {
+    const answers = {};
+    for (const ta of box.querySelectorAll("textarea")) {
+      if (!ta.value.trim()) return ta.focus();
+      answers[ta.dataset.id] = ta.value.trim();
+    }
+    for (const card of box.querySelectorAll(".approval")) {
+      const approve = card.querySelector("input[type=radio]:checked").value === "approve";
+      const reason = card.querySelector("input[type=text]").value.trim();
+      (answers[card.dataset.id] ??= { decisions: [] }).decisions.push(
+        approve ? { type: "approve" } : { type: "reject", ...(reason ? { message: reason } : {}) });
+    }
+    runTurn({ answers });
+  };
+  box.append(send);
+  $("chat").append(msg(box)); scrollDown();
+  box.querySelector("textarea")?.focus();
+}
+
+// ---------- memories drawer ----------
+async function loadMemories() {
+  if (!state.tenant || !state.user) return;
+  try { state.memories = await getJSON("/api/memories", scopeParams()); } catch (e) { state.memories = null; }
+  renderMemories();
+}
+
+function renderMemories() {
+  const labels = { sector: `Sector · ${state.tenant}`, team: `Team · ${state.team || "none"}`, personal: `Personal · ${state.user}` };
+  const tabs = $("memTabs"); tabs.innerHTML = "";
+  for (const [key, label] of Object.entries(labels)) {
+    const b = el("button", key === state.memTab ? "active" : "", esc(label));
+    b.onclick = () => { state.memTab = key; renderMemories(); };
+    tabs.append(b);
+  }
+  const body = $("memBody"); body.innerHTML = "";
+  const files = state.memories?.[state.memTab] || [];
+  const folder = { sector: "/sector/", team: "/team/", personal: "/memories/" }[state.memTab];
+  if (state.memTab === "team" && !state.team) body.append(el("div", "hint", "No team is active, so there is no team memory in this context."));
+  else if (!files.length) body.append(el("div", "hint", `Nothing saved under <code>${folder}</code> yet.`));
+  for (const f of files) body.append(el("div", "memfile",
+    `<div class="path">${esc(f.path)}</div><div class="when">updated ${when(f.updated_at)}</div><pre>${esc(f.content)}</pre>`));
+}
+
+// ---------- wiring ----------
+$("apply").onclick = enterScope;
+["tenant", "user"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") enterScope(); }));
+$("team").onchange = changeTeam;
+$("newSession").onclick = () => { if (!state.busy) newSession(); };
+$("memoriesBtn").onclick = () => { $("drawer").classList.add("open"); loadMemories(); };
+$("closeMem").onclick = () => $("drawer").classList.remove("open");
+$("refreshMem").onclick = loadMemories;
+$("composer").onsubmit = (e) => {
+  e.preventDefault();
+  const text = $("prompt").value.trim();
+  if (!text || state.busy) return;
+  if (!state.tenant || !state.user) return showError("Choose a sector and user first.");
+  $("chat").querySelector(".empty")?.remove();
+  $("chat").append(userMsg(text, state.user));
+  $("prompt").value = "";
+  runTurn({ message: text });
+};
+// ---------- live updates ----------
+// Every few seconds, refresh the session list; if a teammate finished a turn in the open session, redraw it.
+// Skipped while a turn of ours is running, the tab is hidden, or you're typing (a redraw would wipe it).
+const typing = () => $("prompt").value.trim() || [...document.querySelectorAll(".pending textarea")].some((t) => t.value.trim());
+setInterval(async () => {
+  if (!state.tenant || !state.user || state.busy || document.hidden) return;
+  try {
+    const cur = (await loadSessions()).find((s) => s.id === state.threadId);
+    if (cur && state.seenAt && cur.updated_at !== state.seenAt && !typing()) openSession(cur.id);
+  } catch {}
+}, 4000);
+
+$("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } });
+
+const saved = restore();
+$("tenant").value = saved.tenant || "acme"; $("user").value = saved.user || "alice"; state.team = saved.team || null;
+renderTeams();
+enterScope();
+</script>
+</body>
+</html>

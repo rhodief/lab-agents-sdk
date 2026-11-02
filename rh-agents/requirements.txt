@@ -8,3 +8,6 @@ tavily-python
 langchain-openai
 langgraph-checkpoint-postgres
 psycopg[binary,pool]
+openinference-instrumentation-langchain
+fastapi
+uvicorn

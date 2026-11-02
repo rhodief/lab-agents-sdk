@@ -8,6 +8,8 @@ services:
     init: true
     restart: unless-stopped
     working_dir: /app
+    ports:
+      - 8000:8000
     volumes:
       - ./rh-agents:/app
   phoenix:

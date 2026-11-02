@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Rooms</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #ffffff; --border: #e3e3e8; --text: #1d1d22; --muted: #6b6b76;
+    --accent: #2563eb; --accent-text: #ffffff; --mine: #e8effd; --agent: #f3f0ff; --agent-ink: #6d28d9;
+    --warn: #b45309; --warn-bg: #fff8eb; --error: #b91c1c; --error-bg: #fdecec; --ok: #15803d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141417; --panel: #1c1c21; --border: #2e2e36; --text: #e8e8ee; --muted: #9a9aa6;
+      --accent: #6b9bff; --accent-text: #0b0b0e; --mine: #22304d; --agent: #251f38; --agent-ink: #c4b5fd;
+      --warn: #fbbf24; --warn-bg: #2b2414; --error: #f87171; --error-bg: #3a1a1a; --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  input, select, textarea { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  header label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  header input { width: 110px; }
+
+  .layout { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+  aside { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside form { display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid var(--border); }
+  aside form input { flex: 1; min-width: 0; }
+  aside .context { font-size: 12px; color: var(--muted); padding: 8px 12px 0; }
+  aside ul { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+  aside li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  aside li:hover { background: var(--bg); }
+  aside li.active { background: var(--mine); }
+  aside li .title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  aside li .meta { font-size: 12px; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 13px; padding: 10px; }
+
+  main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .roomhead { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+  .roomhead h2 { font-size: 15px; margin: 0; }
+  .roomhead .agents { font-size: 12px; color: var(--muted); }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .empty { margin: auto; color: var(--muted); text-align: center; max-width: 420px; }
+
+  .row { display: flex; flex-direction: column; align-items: flex-start; max-width: 860px; width: 100%; margin: 0 auto; }
+  .row.mine { align-items: flex-end; }
+  .who { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 4px 3px; }
+  .who time { font-weight: 400; margin-left: 6px; }
+  .bubble { padding: 9px 13px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--border); }
+  .row.mine .bubble { background: var(--mine); border-color: transparent; white-space: pre-wrap; }
+  .row.person .bubble { white-space: pre-wrap; }
+  .row.agent .who { color: var(--agent-ink); }
+  .row.agent .bubble { background: var(--agent); border-color: transparent; max-width: 100%; }
+  .bubble > :first-child { margin-top: 0; } .bubble > :last-child { margin-bottom: 0; }
+  .bubble pre { overflow-x: auto; background: var(--bg); padding: 8px; border-radius: 6px; }
+  .bubble table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .bubble th, .bubble td { border: 1px solid var(--border); padding: 4px 8px; }
+  .mention { color: var(--accent); font-weight: 600; }
+  .row.agent .mention { color: var(--agent-ink); }
+  .row.question .bubble { background: var(--warn-bg); border-color: var(--warn); }
+  .row.answer .bubble { border-style: dashed; }
+  .system { text-align: center; font-size: 12px; color: var(--muted); max-width: 860px; margin: 0 auto; }
+  .system.error { color: var(--error); }
+
+  .live { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-ink); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  #pending { max-width: 860px; width: 100%; margin: 0 auto; }
+  .card { border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 12px; padding: 12px; margin-top: 8px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; color: var(--warn); }
+  .card .q { margin-bottom: 6px; font-weight: 600; }
+  .card textarea { width: 100%; min-height: 60px; margin-bottom: 8px; resize: vertical; }
+  .card pre { white-space: pre-wrap; max-height: 180px; overflow: auto; background: var(--panel); padding: 8px; border-radius: 6px; font-size: 12px; }
+  .card .choice { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .card .choice input[type=text] { flex: 1; min-width: 160px; }
+
+  .composer { border-top: 1px solid var(--border); background: var(--panel); padding: 10px 16px 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; font-size: 12px; color: var(--muted); align-items: center; }
+  .chips button { padding: 1px 8px; font-size: 12px; border-radius: 999px; color: var(--agent-ink); }
+  .composer form { display: flex; gap: 8px; max-width: 860px; margin: 0 auto; }
+  .composer textarea { flex: 1; resize: none; height: 44px; max-height: 160px; }
+  .composer .chips { max-width: 860px; margin: 0 auto 6px; }
+  #error { display: none; position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: var(--error-bg); color: var(--error); border: 1px solid var(--error); padding: 8px 14px; border-radius: 8px; max-width: 90vw; z-index: 5; }
+
+  @media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--border); max-height: 34vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Team Rooms</h1>
+  <label>Sector <input id="tenant" placeholder="acme"></label>
+  <label>User <input id="user" placeholder="alice"></label>
+  <button id="enter">Enter</button>
+  <label>Team <select id="team"></select></label>
+</header>
+
+<div class="layout">
+  <aside>
+    <form id="newRoom"><input id="roomTitle" placeholder="New room name"><button class="primary">Create</button></form>
+    <div class="context" id="context"></div>
+    <ul id="rooms"></ul>
+  </aside>
+  <main>
+    <div class="roomhead" id="roomhead" hidden><h2 id="roomTitleView"></h2><span class="agents" id="roomAgents"></span></div>
+    <div id="log"><div class="empty">Choose a sector, user and team, then open or create a room.</div></div>
+    <div class="composer">
+      <div class="chips" id="chips"></div>
+      <form id="composer">
+        <textarea id="text" placeholder="Message the room… mention @agent to ask the agent (Enter to send, Shift+Enter for a new line)" disabled></textarea>
+        <button class="primary" id="send" disabled>Send</button>
+      </form>
+    </div>
+  </main>
+</div>
+<div id="error"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+const md = (text) => DOMPurify.sanitize(marked.parse(text || ""));
+const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const when = (iso) => { const d = new Date(iso); return d.toDateString() === new Date().toDateString() ? time(iso) : d.toLocaleDateString(); };
+
+const state = { tenant: "", user: "", team: null, teams: [], agents: [], room: null, lastId: 0, source: null, agentState: [] };
+const scope = () => ({ tenant: state.tenant, user: state.user, team: state.team });
+
+function showError(message) {
+  const box = $("error"); box.textContent = message; box.style.display = "block";
+  clearTimeout(showError.t); showError.t = setTimeout(() => (box.style.display = "none"), 6000);
+}
+async function api(path, { params, body } = {}) {
+  const url = path + (params ? "?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)) : "");
+  const res = await fetch(url, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+function save() { try { localStorage.setItem("roomScope", JSON.stringify({ tenant: state.tenant, user: state.user, team: state.team })); } catch {} }
+function load() { try { return JSON.parse(localStorage.getItem("roomScope") || "{}"); } catch { return {}; } }
+
+// ---------- sector / user / team ----------
+async function enter() {
+  state.tenant = $("tenant").value.trim(); state.user = $("user").value.trim();
+  if (!state.tenant || !state.user) return showError("Enter a sector and a user.");
+  try { state.teams = (await api("/api/teams", { params: { tenant: state.tenant, user: state.user } })).teams; }
+  catch (e) { return showError(e.message); }
+  if (!state.teams.includes(state.team)) state.team = state.teams[0] || null;
+  renderTeams(); save(); closeRoom(); loadRooms();
+}
+function renderTeams() {
+  const sel = $("team"); sel.innerHTML = "";
+  if (!state.teams.length) sel.append(new Option("— join a team —", ""));
+  state.teams.forEach((t) => sel.append(new Option(t, t)));
+  sel.append(new Option("+ join team…", "__join__"));
+  sel.value = state.team || "";
+}
+async function changeTeam() {
+  let value = $("team").value;
+  if (value === "__join__") {
+    const name = (window.prompt("Team to join") || "").trim();
+    if (!name) return renderTeams();
+    try { state.teams = (await api("/api/teams", { body: { tenant: state.tenant, user: state.user, team: name } })).teams; }
+    catch (e) { renderTeams(); return showError(e.message); }
+    value = name;
+  }
+  state.team = value || null; renderTeams(); save(); closeRoom(); loadRooms();
+}
+
+// ---------- rooms ----------
+async function loadRooms() {
+  $("context").textContent = state.tenant ? `${state.tenant} / ${state.team || "no team"} / ${state.user}` : "";
+  const list = $("rooms"); list.innerHTML = "";
+  if (!state.tenant || !state.user) return;
+  if (!state.team) { list.append(el("li", "hint", "Join a team to see its rooms.")); return; }
+  let rooms;
+  try { rooms = (await api("/api/rooms", { params: scope() })).rooms; } catch (e) { return showError(e.message); }
+  if (!rooms.length) list.append(el("li", "hint", `No rooms in team ${esc(state.team)} yet. Create one above.`));
+  for (const r of rooms) {
+    const li = el("li", r.id === state.room?.id ? "active" : "",
+      `<span class="title"># ${esc(r.title)}</span><span class="meta">by ${r.created_by === state.user ? "you" : esc(r.created_by)} · ${when(r.updated_at)}</span>`);
+    li.onclick = () => openRoom(r);
+    list.append(li);
+  }
+}
+$("newRoom").onsubmit = async (e) => {
+  e.preventDefault();
+  const title = $("roomTitle").value.trim();
+  if (!title) return;
+  if (!state.team) return showError("Pick or join a team first.");
+  try { const room = await api("/api/rooms", { body: { ...scope(), title } }); $("roomTitle").value = ""; await loadRooms(); openRoom(room); }
+  catch (err) { showError(err.message); }
+};
+
+function closeRoom() {
+  state.source?.close(); state.source = null; state.room = null; state.lastId = 0; state.agentState = [];
+  $("roomhead").hidden = true;
+  $("log").innerHTML = `<div class="empty">${state.team ? "Open or create a room." : "Join a team to use rooms."}</div>`;
+  $("text").disabled = $("send").disabled = true; $("chips").innerHTML = "";
+}
+function openRoom(room) {
+  closeRoom();
+  state.room = room;
+  $("roomhead").hidden = false; $("roomTitleView").textContent = "# " + room.title;
+  $("roomAgents").textContent = "Agents here: " + state.agents.map((a) => "@" + a.name).join(", ");
+  const pending = el("div"); pending.id = "pending"; $("log").innerHTML = ""; $("log").append(pending);
+  $("text").disabled = $("send").disabled = false; $("text").focus();
+  $("chips").innerHTML = "Ask an agent:";
+  for (const a of state.agents) {
+    const b = el("button", "", "@" + esc(a.name)); b.type = "button"; b.title = a.about;
+    b.onclick = () => { const t = $("text"); t.value = (t.value && !t.value.endsWith(" ") ? t.value + " " : t.value) + "@" + a.name + " "; t.focus(); };
+    $("chips").append(b);
+  }
+  document.querySelectorAll("#rooms li").forEach((li) => li.classList.remove("active"));
+  loadRooms();
+  connect();
+}
+
+// ---------- live events ----------
+function connect() {
+  const room = state.room; if (!room) return;
+  const source = new EventSource(`/api/rooms/${room.id}/events?` + new URLSearchParams({ ...scope(), after: state.lastId }));
+  state.source = source;
+  source.onmessage = (e) => {
+    if (state.room !== room) return;
+    const event = JSON.parse(e.data);
+    const atBottom = nearBottom();
+    if (event.type === "message" && event.id > state.lastId) { state.lastId = event.id; addMessage(event); }
+    else if (event.type === "agents") { state.agentState = event.agents; renderAgents(); }
+    if (atBottom) scrollDown();
+  };
+  // reconnect from the last message we have, instead of letting EventSource replay from the start
+  source.onerror = () => { source.close(); if (state.source === source) setTimeout(() => state.room === room && connect(), 2000); };
+}
+const nearBottom = () => { const l = $("log"); return l.scrollHeight - l.scrollTop - l.clientHeight < 120; };
+const scrollDown = () => { const l = $("log"); l.scrollTop = l.scrollHeight; };
+
+const agentNames = () => state.agents.map((a) => a.name);
+function highlight(html) {  // mark @mentions of agents and people in already-escaped text
+  return html.replace(/(^|[^\w@])@([A-Za-z0-9_\-]+)/g, (m, pre, name) => `${pre}<span class="mention">@${name}</span>`);
+}
+function addMessage(m) {
+  const log = $("log"), before = $("pending");
+  let node;
+  if (m.kind === "system") {
+    node = el("div", "system" + (/ failed: /.test(m.text) ? " error" : ""), esc(m.text));
+  } else {
+    const isAgent = agentNames().includes(m.author) && m.kind !== "user" && m.kind !== "answer";
+    const mine = !isAgent && m.author === state.user;
+    const cls = ["row", isAgent ? "agent" : mine ? "mine" : "person", m.kind === "question" ? "question" : "", m.kind === "answer" ? "answer" : ""].join(" ");
+    node = el("div", cls);
+    const label = isAgent ? `@${esc(m.author)}${m.kind === "question" ? " asks" : ""}` : mine ? "you" : esc(m.author);
+    const extra = m.kind === "answer" ? ` <span style="font-weight:400">answered @${esc(m.data.agent)}</span>` : "";
+    node.append(el("div", "who", `${label}${extra}<time>${time(m.created_at)}</time>`));
+    const body = el("div", "bubble", isAgent || m.kind === "answer" ? highlight(md(m.text)) : highlight(esc(m.text)));
+    node.append(body);
+  }
+  log.insertBefore(node, before);
+}
+
+// what each agent is doing right now, and its unanswered questions
+function renderAgents() {
+  document.querySelectorAll(".row.working").forEach((n) => n.remove());
+  const log = $("log"), pendingBox = $("pending");
+  for (const a of state.agentState) {
+    if (!a.status) continue;
+    const row = el("div", "row agent working");
+    row.append(el("div", "who", "@" + esc(a.name)));
+    const bubble = el("div", "bubble");
+    bubble.append(el("div", "live", `<span class="dot"></span>${esc(a.status)}…`));
+    if (a.draft) bubble.append(el("div", "", md(a.draft)));
+    row.append(bubble);
+    log.insertBefore(row, pendingBox);
+  }
+  const typing = [...pendingBox.querySelectorAll("textarea, input[type=text]")].some((t) => t.value.trim());
+  const key = JSON.stringify(state.agentState.map((a) => [a.name, a.pending]));
+  if (typing && key === pendingBox.dataset.key) return;  // don't wipe an answer someone is typing
+  pendingBox.dataset.key = key; pendingBox.innerHTML = "";
+  for (const a of state.agentState) if (a.pending?.length) pendingBox.append(pendingCard(a));
+}
+
+function pendingCard(agent) {
+  const card = el("div", "card");
+  card.append(el("h3", "", `@${esc(agent.name)} is waiting for an answer · anyone in the team can reply`));
+  const inputs = [];
+  for (const item of agent.pending) {
+    if (item.kind === "question") {
+      card.append(el("div", "q", esc(item.question)));
+      const ta = el("textarea"); ta.placeholder = "Your answer"; card.append(ta);
+      inputs.push(() => [item.id, ta.value.trim()]);
+    } else {
+      const choices = item.actions.map((action) => {
+        card.append(el("div", "q", `Approve ${esc(action.name)} › <code>${esc(action.file_path)}</code>?`));
+        card.append(el("pre", "", esc(action.content)));
+        const line = el("div", "choice");
+        const name = "c" + Math.random().toString(36).slice(2);
+        line.innerHTML = `<label><input type="radio" name="${name}" value="approve" checked> approve</label>
+          <label><input type="radio" name="${name}" value="reject"> reject</label>
+          <input type="text" placeholder="reason (optional, for reject)">`;
+        card.append(line);
+        return () => {
+          const type = line.querySelector("input:checked").value, message = line.querySelector("input[type=text]").value.trim();
+          return { type, ...(type === "reject" && message ? { message } : {}) };
+        };
+      });
+      inputs.push(() => [item.id, { decisions: choices.map((c) => c()) }]);
+    }
+  }
+  const send = el("button", "primary", "Send answer");
+  send.onclick = async () => {
+    const answers = Object.fromEntries(inputs.map((f) => f()));
+    if (Object.values(answers).some((v) => v === "")) return showError("Answer every question first.");
+    send.disabled = true;
+    try { await api(`/api/rooms/${state.room.id}/answers`, { body: { ...scope(), agent: agent.name, answers } }); $("pending").dataset.key = ""; }
+    catch (e) { showError(e.message); send.disabled = false; }
+  };
+  card.append(send);
+  return card;
+}
+
+// ---------- composer ----------
+$("composer").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("text").value.trim();
+  if (!text || !state.room) return;
+  $("send").disabled = true;
+  try { await api(`/api/rooms/${state.room.id}/messages`, { body: { ...scope(), text } }); $("text").value = ""; }
+  catch (err) { showError(err.message); }
+  $("send").disabled = false; $("text").focus();
+};
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } });
+$("text").addEventListener("input", () => { const t = $("text"); t.style.height = "44px"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; });
+
+$("enter").onclick = enter;
+["tenant", "user"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") enter(); }));
+$("team").onchange = changeTeam;
+setInterval(() => { if (state.team && !document.hidden) loadRooms(); }, 10000);  // new rooms from teammates
+
+(async () => {
+  try { state.agents = (await api("/api/agents")).agents; } catch {}
+  const saved = load();
+  $("tenant").value = saved.tenant || "acme"; $("user").value = saved.user || "alice"; state.team = saved.team || null;
+  enter();
+})();
+</script>
+</body>
+</html>
