@@ -5,8 +5,13 @@ import os
 from dotenv import load_dotenv
 from phoenix.otel import register
 from openinference.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from openai.types.responses import ResponseTextDeltaEvent
+from openai.types.responses import (
+    ResponseReasoningSummaryTextDeltaEvent,
+    ResponseReasoningTextDeltaEvent,
+    ResponseTextDeltaEvent,
+)
 from httpx import HTTPError
+from openai.types.shared import Reasoning
 from opentelemetry import trace
 from phoenix.client import Client as PhoenixClient
 
@@ -32,19 +37,23 @@ set_default_openai_client(client)
 
 from agents import Agent, OpenAIChatCompletionsModel, RunConfig, Runner
 
-#MODEL = "gemini-3.8-flash"
-MODEL = "gpt-5.6-luna"
+MODEL = "gemini-3.8-flash"
+#MODEL = "gpt-5.6-luna"  # proxy returns no reasoning_content for this model
 USER_ID = "user-id-teste"
 SESSION_ID = "session-001"
 TENANT_ID = "tenant-demo"
 ENVIRONMENT = "development"
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006")
+PINK = "\033[95m"
+RESET = "\033[0m"
 
 async def main():
     agent = Agent(
         name="Judiciary Agent",
         model=OpenAIChatCompletionsModel(model=MODEL, openai_client=client),
         model_settings=ModelSettings(
+            # gemini only streams reasoning_content when reasoning_effort is set
+            reasoning=Reasoning(effort="medium"),
             extra_args={"user": USER_ID},
             extra_body={
                 "metadata": {
@@ -90,9 +99,25 @@ async def main():
             run_config=run_config,
         )
 
+        reasoning_open = False
         async for event in result.stream_events():
-            if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
+            if event.type != "raw_response_event":
+                continue
+            if isinstance(
+                event.data,
+                (ResponseReasoningTextDeltaEvent, ResponseReasoningSummaryTextDeltaEvent),
+            ):
+                if not reasoning_open:
+                    print(PINK, end="", flush=True)
+                    reasoning_open = True
                 print(event.data.delta, end="", flush=True)
+            elif isinstance(event.data, ResponseTextDeltaEvent):
+                if reasoning_open:
+                    print(RESET, end="", flush=True)
+                    reasoning_open = False
+                print(event.data.delta, end="", flush=True)
+        if reasoning_open:
+            print(RESET, end="", flush=True)
 
         request_span.set_attribute("app.response_status", "completed")
         request_span.add_event("response.completed")

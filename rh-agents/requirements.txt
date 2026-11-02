@@ -3,3 +3,8 @@ pydantic
 python-dotenv
 arize-phoenix
 openinference-instrumentation-openai-agents
+deepagents
+tavily-python
+langchain-openai
+langgraph-checkpoint-postgres
+psycopg[binary,pool]
